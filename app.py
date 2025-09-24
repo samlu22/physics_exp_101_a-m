@@ -573,34 +573,46 @@ def generate_data_points(M, theta, f, m_min=10, m_max=300, num_points=50):
     return data
 
 def find_zero_crossings(data_points):
-    """從數據中找出零點"""
+    """從數據中找出真正的零點（符號變化點）"""
     zero_crossings = []
     
     for i in range(len(data_points) - 1):
         a1 = data_points[i]['acceleration']
         a2 = data_points[i + 1]['acceleration']
         
-        # 檢查符號變化
-        if a1 * a2 <= 0:  # 符號變化或其中一個為0
+        # 只在真正的符號變化時記錄零點（不包括連續的零點）
+        if a1 * a2 < 0:  # 嚴格的符號變化
             m1 = data_points[i]['mass_g']
             m2 = data_points[i + 1]['mass_g']
             # 線性插值找精確零點
             if abs(a2 - a1) > 1e-10:
                 m_zero = m1 - a1 * (m2 - m1) / (a2 - a1)
-            else:
-                m_zero = (m1 + m2) / 2
-            zero_crossings.append(m_zero)
+                zero_crossings.append(m_zero)
+        elif abs(a1) < 1e-6:  # a1 接近零
+            zero_crossings.append(data_points[i]['mass_g'])
+        elif abs(a2) < 1e-6:  # a2 接近零
+            zero_crossings.append(data_points[i + 1]['mass_g'])
     
-    return sorted(zero_crossings)
+    # 移除重複的零點（容忍度 1g）
+    unique_zeros = []
+    for zero in sorted(zero_crossings):
+        if not unique_zeros or abs(zero - unique_zeros[-1]) > 1.0:
+            unique_zeros.append(zero)
+    
+    return unique_zeros
 
 def reverse_engineer_parameters(data_points):
-    """
-    從 a-m 數據反推物理參數
-    """
+    """從 a-m 數據反推物理參數"""
+    
+    print(f"Debug: 收到 {len(data_points)} 個數據點")
+    print(f"Debug: 加速度範圍: {min(d['acceleration'] for d in data_points):.3f} 到 {max(d['acceleration'] for d in data_points):.3f}")
+    
     # 步驟1: 找出零點
     zero_crossings = find_zero_crossings(data_points)
+    print(f"Debug: 找到 {len(zero_crossings)} 個零點: {zero_crossings}")
     
     if len(zero_crossings) < 1:
+        print("Debug: 沒有找到零點")
         return None
     
     # 根據理論，應該有最多2個零點
@@ -704,7 +716,7 @@ def reverse_engineer_parameters(data_points):
         'calculation_success': M_kg_calculated is not None and theta_calculated is not None,
         'high_accel_points_used': len(high_accel_points) if 'high_accel_points' in locals() else 0
     }
-# def reverse_engineer_parameters(data_points):
+# # def reverse_engineer_parameters(data_points):
 #     """
 #     從 a-m 數據反推物理參數
     
@@ -1243,29 +1255,11 @@ def update_reverse_analysis(forward_data):
     if not reverse_result:
         return "反向分析失敗：無法從數據中找到零點", []
     
-    # # 顯示反向分析結果
-    # results_display = html.Div([
-    #     html.H4("步驟 1: 零點分析"),
-    #     html.P(f"找到零點: {[f'{x:.1f}g' for x in reverse_result['zero_crossings']]}"),
-    #     html.P(f"m- = {reverse_result['m_minus_g']:.1f} g"),
-    #     html.P(f"m+ = {reverse_result['m_plus_g']:.1f} g" if reverse_result['m_plus_g'] else "m+ = 未找到"),
-        
-    #     html.H4("步驟 2: 基本參數推算"),
-    #     html.P(f"Mg sin θ = {reverse_result['mg_sin_theta']:.3f} N"),
-    #     html.P(f"摩擦力 f = {reverse_result['f_estimated']:.3f} N"),
-        
-    #     html.H4("步驟 3: 非線性擬合結果"),
-    #     html.P(f"擬合成功: {'是' if reverse_result['fit_success'] else '否'}"),
-    #     html.P(f"擬合後 M = {reverse_result['M_fitted_g']:.1f} g"),
-    #     html.P(f"擬合後 θ = {reverse_result['theta_fitted']:.1f}°"),
-    #     html.P(f"擬合後 f = {reverse_result['f_fitted']:.3f} N"),
-    # ])
-    
-    # 在反向分析回調函數中修改顯示
+    # 顯示反向分析結果
     results_display = html.Div([
         html.H4("步驟 1: 零點分析"),
         html.P(f"找到零點數量: {len(reverse_result['zero_crossings'])}"),
-        html.P(f"零點位置: {[f'{x:.1f}g' for x in reverse_result['zero_crossings'][:5]]}{'...' if len(reverse_result['zero_crossings']) > 5 else ''}"),
+        html.P(f"零點位置: {[f'{x:.1f}g' for x in reverse_result['zero_crossings']]}"),
         html.P(f"m- = {reverse_result['m_minus_g']:.1f} g"),
         html.P(f"m+ = {reverse_result['m_plus_g']:.1f} g"),
         
@@ -1281,36 +1275,141 @@ def update_reverse_analysis(forward_data):
         html.P("利用不同質量點的加速度方程組求解"),
         html.P(f"計算成功: {'是' if reverse_result['calculation_success'] else '否'}"),
         
-        html.P(f"M = {reverse_result['M_calculated_g']:.1f} g" if reverse_result['M_calculated_g'] else "M = 計算失敗"),
-        html.P(f"θ = {reverse_result['theta_calculated']:.1f}°" if reverse_result['theta_calculated'] else "θ = 計算失敗"),
-        html.P(f"f = {reverse_result['f_estimated']:.3f} N"),
+        html.Div([
+            html.P(f"M = {reverse_result['M_calculated_g']:.1f} g" if reverse_result['M_calculated_g'] else "M = 計算失敗"),
+            html.P(f"θ = {reverse_result['theta_calculated']:.1f}°" if reverse_result['theta_calculated'] else "θ = 計算失敗"),
+            html.P(f"f = {reverse_result['f_estimated']:.3f} N"),
+        ], style={'backgroundColor': '#e8f5e8', 'padding': '10px', 'borderRadius': '5px'})
     ])
+    
+    # 參數對比表格 - 修正鍵值錯誤
+    comparison_data = []
+    
+    if reverse_result['calculation_success']:
+        comparison_data = [
+            {
+                'parameter': 'M (g)',
+                'original': f"{original_params['M']:.1f}",
+                'reverse': f"{reverse_result['M_calculated_g']:.1f}",  # 修正：使用 M_calculated_g
+                'error': f"{abs(original_params['M'] - reverse_result['M_calculated_g']):.1f} ({abs(original_params['M'] - reverse_result['M_calculated_g'])/original_params['M']*100:.1f}%)"
+            },
+            {
+                'parameter': 'θ (°)',
+                'original': f"{original_params['theta']:.1f}",
+                'reverse': f"{reverse_result['theta_calculated']:.1f}",  # 修正：使用 theta_calculated
+                'error': f"{abs(original_params['theta'] - reverse_result['theta_calculated']):.1f} ({abs(original_params['theta'] - reverse_result['theta_calculated'])/max(original_params['theta'], 1)*100:.1f}%)"
+            },
+            {
+                'parameter': 'f (N)',
+                'original': f"{original_params['f']:.3f}",
+                'reverse': f"{reverse_result['f_estimated']:.3f}",  # 修正：使用 f_estimated
+                'error': f"{abs(original_params['f'] - reverse_result['f_estimated']):.3f} ({abs(original_params['f'] - reverse_result['f_estimated'])/max(original_params['f'], 0.01)*100:.1f}%)"
+            }
+        ]
+    else:
+        comparison_data = [
+            {
+                'parameter': 'M (g)',
+                'original': f"{original_params['M']:.1f}",
+                'reverse': "計算失敗",
+                'error': "N/A"
+            },
+            {
+                'parameter': 'θ (°)',
+                'original': f"{original_params['theta']:.1f}",
+                'reverse': "計算失敗",
+                'error': "N/A"
+            },
+            {
+                'parameter': 'f (N)',
+                'original': f"{original_params['f']:.3f}",
+                'reverse': f"{reverse_result['f_estimated']:.3f}",
+                'error': f"{abs(original_params['f'] - reverse_result['f_estimated']):.3f}"
+            }
+        ]
+    
+    return results_display, comparison_data
+# def update_reverse_analysis(forward_data):
+#     if not forward_data:
+#         return "請先在正向分析中設定參數", []
+    
+#     data_points = forward_data['data_points']
+#     original_params = forward_data['original_params']
+    
+#     # 執行反向分析
+#     reverse_result = reverse_engineer_parameters(data_points)
+    
+#     if not reverse_result:
+#         return "反向分析失敗：無法從數據中找到零點", []
+    
+#     # # 顯示反向分析結果
+#     # results_display = html.Div([
+#     #     html.H4("步驟 1: 零點分析"),
+#     #     html.P(f"找到零點: {[f'{x:.1f}g' for x in reverse_result['zero_crossings']]}"),
+#     #     html.P(f"m- = {reverse_result['m_minus_g']:.1f} g"),
+#     #     html.P(f"m+ = {reverse_result['m_plus_g']:.1f} g" if reverse_result['m_plus_g'] else "m+ = 未找到"),
+        
+#     #     html.H4("步驟 2: 基本參數推算"),
+#     #     html.P(f"Mg sin θ = {reverse_result['mg_sin_theta']:.3f} N"),
+#     #     html.P(f"摩擦力 f = {reverse_result['f_estimated']:.3f} N"),
+        
+#     #     html.H4("步驟 3: 非線性擬合結果"),
+#     #     html.P(f"擬合成功: {'是' if reverse_result['fit_success'] else '否'}"),
+#     #     html.P(f"擬合後 M = {reverse_result['M_fitted_g']:.1f} g"),
+#     #     html.P(f"擬合後 θ = {reverse_result['theta_fitted']:.1f}°"),
+#     #     html.P(f"擬合後 f = {reverse_result['f_fitted']:.3f} N"),
+#     # ])
+    
+#     # 在反向分析回調函數中修改顯示
+#     results_display = html.Div([
+#         html.H4("步驟 1: 零點分析"),
+#         html.P(f"找到零點數量: {len(reverse_result['zero_crossings'])}"),
+#         html.P(f"零點位置: {[f'{x:.1f}g' for x in reverse_result['zero_crossings'][:5]]}{'...' if len(reverse_result['zero_crossings']) > 5 else ''}"),
+#         html.P(f"m- = {reverse_result['m_minus_g']:.1f} g"),
+#         html.P(f"m+ = {reverse_result['m_plus_g']:.1f} g"),
+        
+#         html.H4("步驟 2: 基本參數推算"),
+#         html.P("使用公式:"),
+#         html.Div("$$Mg\\sin\\theta = \\frac{(m_+ + m_-) \\times g}{2}$$", style={'margin': '10px 0'}),
+#         html.Div("$$f = \\frac{(m_+ - m_-) \\times g}{2}$$", style={'margin': '10px 0'}),
+#         html.P(f"計算得: Mg sin θ = ({reverse_result['m_plus_g']:.1f} + {reverse_result['m_minus_g']:.1f}) × 9.8 / 2000 = {reverse_result['mg_sin_theta']:.3f} N"),
+#         html.P(f"計算得: f = ({reverse_result['m_plus_g']:.1f} - {reverse_result['m_minus_g']:.1f}) × 9.8 / 2000 = {reverse_result['f_estimated']:.3f} N"),
+        
+#         html.H4("步驟 3: 分離 M 和 θ"),
+#         html.P(f"使用 {reverse_result.get('high_accel_points_used', 0)} 個高加速度數據點"),
+#         html.P("利用不同質量點的加速度方程組求解"),
+#         html.P(f"計算成功: {'是' if reverse_result['calculation_success'] else '否'}"),
+        
+#         html.P(f"M = {reverse_result['M_calculated_g']:.1f} g" if reverse_result['M_calculated_g'] else "M = 計算失敗"),
+#         html.P(f"θ = {reverse_result['theta_calculated']:.1f}°" if reverse_result['theta_calculated'] else "θ = 計算失敗"),
+#         html.P(f"f = {reverse_result['f_estimated']:.3f} N"),
+#     ])
     
    
     
-    # 參數對比表格
-    comparison_data = [
-        {
-            'parameter': 'M (g)',
-            'original': f"{original_params['M']:.1f}",
-            'reverse': f"{reverse_result['M_fitted_g']:.1f}",
-            'error': f"{abs(original_params['M'] - reverse_result['M_fitted_g']):.1f} ({abs(original_params['M'] - reverse_result['M_fitted_g'])/original_params['M']*100:.1f}%)"
-        },
-        {
-            'parameter': 'θ (°)',
-            'original': f"{original_params['theta']:.1f}",
-            'reverse': f"{reverse_result['theta_fitted']:.1f}",
-            'error': f"{abs(original_params['theta'] - reverse_result['theta_fitted']):.1f} ({abs(original_params['theta'] - reverse_result['theta_fitted'])/max(original_params['theta'], 1)*100:.1f}%)"
-        },
-        {
-            'parameter': 'f (N)',
-            'original': f"{original_params['f']:.3f}",
-            'reverse': f"{reverse_result['f_fitted']:.3f}",
-            'error': f"{abs(original_params['f'] - reverse_result['f_fitted']):.3f} ({abs(original_params['f'] - reverse_result['f_fitted'])/max(original_params['f'], 0.01)*100:.1f}%)"
-        }
-    ]
+#     # 參數對比表格
+#     comparison_data = [
+#         {
+#             'parameter': 'M (g)',
+#             'original': f"{original_params['M']:.1f}",
+#             'reverse': f"{reverse_result['M_fitted_g']:.1f}",
+#             'error': f"{abs(original_params['M'] - reverse_result['M_fitted_g']):.1f} ({abs(original_params['M'] - reverse_result['M_fitted_g'])/original_params['M']*100:.1f}%)"
+#         },
+#         {
+#             'parameter': 'θ (°)',
+#             'original': f"{original_params['theta']:.1f}",
+#             'reverse': f"{reverse_result['theta_fitted']:.1f}",
+#             'error': f"{abs(original_params['theta'] - reverse_result['theta_fitted']):.1f} ({abs(original_params['theta'] - reverse_result['theta_fitted'])/max(original_params['theta'], 1)*100:.1f}%)"
+#         },
+#         {
+#             'parameter': 'f (N)',
+#             'original': f"{original_params['f']:.3f}",
+#             'reverse': f"{reverse_result['f_fitted']:.3f}",
+#             'error': f"{abs(original_params['f'] - reverse_result['f_fitted']):.3f} ({abs(original_params['f'] - reverse_result['f_fitted'])/max(original_params['f'], 0.01)*100:.1f}%)"
+#         }
+#     ]
     
-    return results_display, comparison_data
+#     return results_display, comparison_data
 
 # 客戶端回調：重新渲染 MathJax
 app.clientside_callback(
