@@ -2,7 +2,7 @@ import dash
 from dash import dcc, html, Input, Output, callback, dash_table
 import plotly.graph_objects as go
 import numpy as np
-import pandas as pd
+#import pandas as pd
 import os
 import logging
 
