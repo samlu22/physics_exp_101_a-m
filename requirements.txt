@@ -1,48 +1,5 @@
-# Web framework
-flask>=2.3.0
-gunicorn>=21.2.0
-
-# Environment and configuration
-python-dotenv>=1.0.0
-
-## OCR
-#pytesseract>=0.3.10
-#
-## LINE Bot
-#line-bot-sdk>=3.3.0
-#
-## OpenAI
-#openai==1.76.0
-#
-## Cloud storage
-#cloudinary>=1.36.0
-#
-## Translation
-#translators>=5.9.2
-
-# Data processing - Updated compatible versions
-pandas>=2.2.0,<2.3.0
-numpy>=1.26.0,<2.0.0
-pandas-ta>=0.3.14b0
-
-# Image processing - Compatible version
-pillow>=10.0.0,<11.0.0
-
-# Visualization - Updated for compatibility
-matplotlib>=3.8.0,<4.0.0
-
-# HTTP requests
-requests>=2.31.0,<3.0.0
-
-# Utility
-click>=8.1.0
-
-# System dependencies (uncomment if needed)
-# setuptools>=65.0.0
-
-
 dash==2.14.1
 plotly==5.17.0
-#pandas==2.1.1
-#numpy==1.24.3
-#gunicorn==21.2.0
+pandas==2.1.1
+numpy==1.24.3
+gunicorn==21.2.0
