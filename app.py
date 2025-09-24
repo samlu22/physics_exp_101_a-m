@@ -601,122 +601,316 @@ def find_zero_crossings(data_points):
     
     return unique_zeros
 
+
 def reverse_engineer_parameters(data_points):
-    """從 a-m 數據反推物理參數"""
+    """
+    從 a-m 數據反推物理參數
+    考慮摩擦力方向的正確物理模型
+    """
     
-    print(f"Debug: 收到 {len(data_points)} 個數據點")
-    print(f"Debug: 加速度範圍: {min(d['acceleration'] for d in data_points):.3f} 到 {max(d['acceleration'] for d in data_points):.3f}")
+    # 分離數據點為不同運動狀態
+    upward_points = [p for p in data_points if p['acceleration'] > 0.01]  # 向上運動
+    downward_points = [p for p in data_points if p['acceleration'] < -0.01]  # 向下運動
+    equilibrium_points = [p for p in data_points if abs(p['acceleration']) <= 0.01]  # 平衡狀態
     
-    # 步驟1: 找出零點
+    print(f"Debug: 向上運動點: {len(upward_points)}, 向下運動點: {len(downward_points)}, 平衡點: {len(equilibrium_points)}")
+    
+    # 找出零點（平衡質量）
     zero_crossings = find_zero_crossings(data_points)
-    print(f"Debug: 找到 {len(zero_crossings)} 個零點: {zero_crossings}")
     
     if len(zero_crossings) < 1:
-        print("Debug: 沒有找到零點")
         return None
     
-    # 根據理論，應該有最多2個零點
+    # 確定 m+ 和 m-
     if len(zero_crossings) == 1:
-        # 可能m-=0的情況
-        m_minus_g = 0
-        m_plus_g = zero_crossings[0]
-    elif len(zero_crossings) >= 2:
-        # 取第一個和最後一個零點
-        m_minus_g = zero_crossings[0]
-        m_plus_g = zero_crossings[-1]
+        if any(p['acceleration'] > 0 for p in data_points if p['mass_g'] > zero_crossings[0]):
+            m_minus_g = 0
+            m_plus_g = zero_crossings[0]
+        else:
+            m_minus_g = zero_crossings[0]
+            m_plus_g = float('inf')  # 沒有向上運動點
+    else:
+        m_minus_g = min(zero_crossings)
+        m_plus_g = max(zero_crossings)
     
     m_minus_kg = m_minus_g / 1000
-    m_plus_kg = m_plus_g / 1000
+    m_plus_kg = m_plus_g / 1000 if m_plus_g != float('inf') else None
     
-    # 步驟2: 基本參數推算
-    # 理論公式：
-    # m+ = (Mg sin θ + f) / g  ... (1)
-    # m- = (Mg sin θ - f) / g  ... (2)
-    # 
-    # 由 (1) + (2): m+ + m- = 2 * Mg sin θ / g
-    # 所以: Mg sin θ = (m+ + m-) * g / 2
-    mg_sin_theta = (m_plus_kg + m_minus_kg) * 9.8 / 2
-    
-    # 由 (1) - (2): m+ - m- = 2f / g
-    # 所以: f = (m+ - m-) * g / 2
-    f_estimated = (m_plus_kg - m_minus_kg) * 9.8 / 2
-    
-    # 步驟3: 從高加速度區域數據點推算 M 和 sin(θ)
-    # 選擇加速度較大的點，這些點遠離平衡區域，線性關係更明顯
-    # a = (mg - Mg sin θ - f) / (M + m)
-    # 重新整理：a(M + m) = mg - Mg sin θ - f
-    # 即：aM + am = mg - Mg sin θ - f
-    # 即：M(a - g sin θ) = m(g - a) - f
-    
-    # 選擇加速度絕對值較大的點進行分析
-    high_accel_points = []
-    for point in data_points:
-        if abs(point['acceleration']) > 0.5:  # 選擇加速度較大的點
-            high_accel_points.append(point)
-    
-    if len(high_accel_points) < 2:
-        # 如果沒有足夠的高加速度點，使用所有非零點
-        high_accel_points = [p for p in data_points if abs(p['acceleration']) > 0.01]
-    
-    # 使用兩個不同的數據點求解M和θ
-    # 選擇兩個加速度差異較大的點
-    if len(high_accel_points) >= 2:
-        point1 = high_accel_points[0]
-        point2 = high_accel_points[-1]
-        
-        # 對每個點：a = (mg - Mg sin θ - f) / (M + m)
-        # 整理得：a(M + m) + Mg sin θ = mg - f
-        # 即：aM + am + Mg sin θ = mg - f
-        # 即：M(a + g sin θ) = mg - f - am = m(g - a) - f
-        
-        m1_kg = point1['mass_kg']
-        a1 = point1['acceleration']
-        m2_kg = point2['mass_kg'] 
-        a2 = point2['acceleration']
-        
-        # 方程組：
-        # M(a1 + g sin θ) = m1(g - a1) - f  ... (3)
-        # M(a2 + g sin θ) = m2(g - a2) - f  ... (4)
-        
-        # 從 (3) - (4):
-        # M(a1 - a2) = m1(g - a1) - m2(g - a2)
-        # M = [m1(g - a1) - m2(g - a2)] / (a1 - a2)
-        
-        if abs(a1 - a2) > 0.001:  # 避免除零
-            M_kg_calculated = (m1_kg * (9.8 - a1) - m2_kg * (9.8 - a2)) / (a1 - a2)
-            
-            # 計算 sin θ
-            # 從 Mg sin θ = mg_sin_theta
-            if M_kg_calculated > 0:
-                sin_theta_calculated = mg_sin_theta / (M_kg_calculated * 9.8)
-                if -1 <= sin_theta_calculated <= 1:
-                    theta_calculated = np.degrees(np.arcsin(sin_theta_calculated))
-                else:
-                    theta_calculated = None
-                    M_kg_calculated = None
-            else:
-                theta_calculated = None
-                M_kg_calculated = None
-        else:
-            M_kg_calculated = None
-            theta_calculated = None
+    # 方法1: 從零點推算基本參數
+    if m_plus_kg:
+        mg_sin_theta = (m_plus_kg + m_minus_kg) * 9.8 / 2
+        f_estimated = (m_plus_kg - m_minus_kg) * 9.8 / 2
     else:
-        M_kg_calculated = None
-        theta_calculated = None
+        # 只有一個零點的情況，需要從數據斜率推算
+        mg_sin_theta = m_minus_kg * 9.8
+        f_estimated = 0  # 初始猜測
+    
+    # 方法2: 分別對向上和向下運動點進行線性回歸
+    M_calculated = None
+    theta_calculated = None
+    f_calculated = None
+    
+    try:
+        # 向上運動: a = (mg - Mg*sin(θ) - f) / (M + m)
+        # 重整理: a*(M + m) = mg - Mg*sin(θ) - f
+        # 即: a*M + a*m = mg - Mg*sin(θ) - f
+        # 即: M*(a - g*sin(θ)) = m*(g - a) - f
+        
+        # 向下運動: a = -(Mg*sin(θ) - f - mg) / (M + m)  
+        # 重整理: a*(M + m) = -(Mg*sin(θ) - f - mg) = mg - Mg*sin(θ) + f
+        # 即: M*(a + g*sin(θ)) = m*(g - a) + f
+        
+        equations = []
+        
+        # 處理向上運動點
+        for point in upward_points[::max(1, len(upward_points)//5)]:  # 取樣減少計算量
+            m_kg = point['mass_kg']
+            a = point['acceleration']
+            # a*(M + m) + Mg*sin(θ) + f = mg
+            # 係數: [M*a + M*g*sin(θ), f, -mg + m*a]
+            equations.append({
+                'type': 'upward',
+                'm': m_kg,
+                'a': a,
+                'coeff_M': a,  # M 的係數 (暫時)
+                'coeff_f': 1,   # f 的係數
+                'rhs': m_kg * 9.8 - m_kg * a  # 右手邊
+            })
+        
+        # 處理向下運動點  
+        for point in downward_points[::max(1, len(downward_points)//5)]:
+            m_kg = point['mass_kg']
+            a = point['acceleration']  # 注意：a < 0
+            # a*(M + m) - Mg*sin(θ) + f = mg
+            equations.append({
+                'type': 'downward',
+                'm': m_kg,
+                'a': a,
+                'coeff_M': a,  # M 的係數 (暫時)
+                'coeff_f': 1,   # f 的係數
+                'rhs': m_kg * 9.8 - m_kg * a  # 右手邊
+            })
+        
+        # 使用最小二乘法求解 M, θ, f
+        if len(equations) >= 3:  # 至少需要3個方程求解3個未知數
+            from scipy.optimize import least_squares
+            
+            def residual_function(params):
+                M_kg, theta_deg, f_val = params
+                theta_rad = np.radians(theta_deg)
+                mg_sin_theta_val = M_kg * 9.8 * np.sin(theta_rad)
+                
+                residuals = []
+                for eq in equations:
+                    m_kg = eq['m']
+                    a = eq['a']
+                    
+                    if eq['type'] == 'upward':
+                        # a*(M + m) + Mg*sin(θ) + f = mg
+                        predicted_rhs = a * (M_kg + m_kg) + mg_sin_theta_val + f_val
+                    else:  # downward
+                        # a*(M + m) - Mg*sin(θ) + f = mg  
+                        predicted_rhs = a * (M_kg + m_kg) - mg_sin_theta_val + f_val
+                    
+                    actual_rhs = eq['rhs']
+                    residuals.append(predicted_rhs - actual_rhs)
+                
+                return residuals
+            
+            # 初始猜測
+            M_kg_init = mg_sin_theta / (9.8 * np.sin(np.radians(30))) if mg_sin_theta > 0 else 0.2
+            theta_init = 30.0
+            f_init = f_estimated
+            
+            result = least_squares(
+                residual_function,
+                [M_kg_init, theta_init, f_init],
+                bounds=([0.05, 0, 0], [0.5, 60, 2])
+            )
+            
+            if result.success:
+                M_calculated = result.x[0] * 1000  # 轉換為g
+                theta_calculated = result.x[1]
+                f_calculated = result.x[2]
+                
+                # 驗證結果的合理性
+                if M_calculated > 0 and 0 <= theta_calculated <= 60 and f_calculated >= 0:
+                    calculation_success = True
+                else:
+                    calculation_success = False
+                    M_calculated = None
+                    theta_calculated = None
+                    f_calculated = None
+            else:
+                calculation_success = False
+        else:
+            calculation_success = False
+    
+    except Exception as e:
+        print(f"Debug: 回歸計算出錯: {e}")
+        calculation_success = False
+    
+    # 如果回歸失敗，使用簡單的兩點法
+    if not calculation_success and len(upward_points) >= 1 and len(downward_points) >= 1:
+        try:
+            # 選擇一個向上運動點和一個向下運動點
+            up_point = upward_points[len(upward_points)//2]
+            down_point = downward_points[len(downward_points)//2]
+            
+            m1_kg = up_point['mass_kg']
+            a1 = up_point['acceleration']
+            m2_kg = down_point['mass_kg'] 
+            a2 = down_point['acceleration']
+            
+            # 向上: a1*(M + m1) + Mg*sin(θ) + f = m1*g
+            # 向下: a2*(M + m2) - Mg*sin(θ) + f = m2*g
+            # 
+            # 兩式相減: a1*(M + m1) - a2*(M + m2) + 2*Mg*sin(θ) = m1*g - m2*g
+            # 整理得: M*(a1 - a2) + (a1*m1 - a2*m2) + 2*Mg*sin(θ) = (m1 - m2)*g
+            
+            # 這需要已知 θ 或另一個方程，暫時使用簡化方法
+            if abs(a1 - a2) > 0.1:
+                # 假設已知 Mg*sin(θ) ≈ mg_sin_theta
+                M_est = (m1_kg - m2_kg) * 9.8 / (a1 - a2)
+                if M_est > 0:
+                    M_calculated = M_est * 1000
+                    theta_calculated = np.degrees(np.arcsin(mg_sin_theta / (M_est * 9.8))) if M_est * 9.8 > 0 else None
+                    f_calculated = f_estimated
+                    calculation_success = True
+        except:
+            calculation_success = False
     
     return {
         'zero_crossings': zero_crossings,
         'm_minus_g': m_minus_g,
-        'm_plus_g': m_plus_g,
+        'm_plus_g': m_plus_g if m_plus_g != float('inf') else None,
         'mg_sin_theta': mg_sin_theta,
         'f_estimated': f_estimated,
-        'M_calculated_kg': M_kg_calculated,
-        'M_calculated_g': M_kg_calculated * 1000 if M_kg_calculated else None,
+        'M_calculated_kg': M_calculated / 1000 if M_calculated else None,
+        'M_calculated_g': M_calculated,
         'theta_calculated': theta_calculated,
-        'calculation_success': M_kg_calculated is not None and theta_calculated is not None,
-        'high_accel_points_used': len(high_accel_points) if 'high_accel_points' in locals() else 0
+        'f_calculated': f_calculated if f_calculated is not None else f_estimated,
+        'calculation_success': calculation_success,
+        'upward_points_count': len(upward_points),
+        'downward_points_count': len(downward_points),
+        'equations_used': len(equations) if 'equations' in locals() else 0
     }
-# # def reverse_engineer_parameters(data_points):
+# def reverse_engineer_parameters(data_points):
+#     """從 a-m 數據反推物理參數"""
+    
+#     print(f"Debug: 收到 {len(data_points)} 個數據點")
+#     print(f"Debug: 加速度範圍: {min(d['acceleration'] for d in data_points):.3f} 到 {max(d['acceleration'] for d in data_points):.3f}")
+    
+#     # 步驟1: 找出零點
+#     zero_crossings = find_zero_crossings(data_points)
+#     print(f"Debug: 找到 {len(zero_crossings)} 個零點: {zero_crossings}")
+    
+#     if len(zero_crossings) < 1:
+#         print("Debug: 沒有找到零點")
+#         return None
+    
+#     # 根據理論，應該有最多2個零點
+#     if len(zero_crossings) == 1:
+#         # 可能m-=0的情況
+#         m_minus_g = 0
+#         m_plus_g = zero_crossings[0]
+#     elif len(zero_crossings) >= 2:
+#         # 取第一個和最後一個零點
+#         m_minus_g = zero_crossings[0]
+#         m_plus_g = zero_crossings[-1]
+    
+#     m_minus_kg = m_minus_g / 1000
+#     m_plus_kg = m_plus_g / 1000
+    
+#     # 步驟2: 基本參數推算
+#     # 理論公式：
+#     # m+ = (Mg sin θ + f) / g  ... (1)
+#     # m- = (Mg sin θ - f) / g  ... (2)
+#     # 
+#     # 由 (1) + (2): m+ + m- = 2 * Mg sin θ / g
+#     # 所以: Mg sin θ = (m+ + m-) * g / 2
+#     mg_sin_theta = (m_plus_kg + m_minus_kg) * 9.8 / 2
+    
+#     # 由 (1) - (2): m+ - m- = 2f / g
+#     # 所以: f = (m+ - m-) * g / 2
+#     f_estimated = (m_plus_kg - m_minus_kg) * 9.8 / 2
+    
+#     # 步驟3: 從高加速度區域數據點推算 M 和 sin(θ)
+#     # 選擇加速度較大的點，這些點遠離平衡區域，線性關係更明顯
+#     # a = (mg - Mg sin θ - f) / (M + m)
+#     # 重新整理：a(M + m) = mg - Mg sin θ - f
+#     # 即：aM + am = mg - Mg sin θ - f
+#     # 即：M(a - g sin θ) = m(g - a) - f
+    
+#     # 選擇加速度絕對值較大的點進行分析
+#     high_accel_points = []
+#     for point in data_points:
+#         if abs(point['acceleration']) > 0.5:  # 選擇加速度較大的點
+#             high_accel_points.append(point)
+    
+#     if len(high_accel_points) < 2:
+#         # 如果沒有足夠的高加速度點，使用所有非零點
+#         high_accel_points = [p for p in data_points if abs(p['acceleration']) > 0.01]
+    
+#     # 使用兩個不同的數據點求解M和θ
+#     # 選擇兩個加速度差異較大的點
+#     if len(high_accel_points) >= 2:
+#         point1 = high_accel_points[0]
+#         point2 = high_accel_points[-1]
+        
+#         # 對每個點：a = (mg - Mg sin θ - f) / (M + m)
+#         # 整理得：a(M + m) + Mg sin θ = mg - f
+#         # 即：aM + am + Mg sin θ = mg - f
+#         # 即：M(a + g sin θ) = mg - f - am = m(g - a) - f
+        
+#         m1_kg = point1['mass_kg']
+#         a1 = point1['acceleration']
+#         m2_kg = point2['mass_kg'] 
+#         a2 = point2['acceleration']
+        
+#         # 方程組：
+#         # M(a1 + g sin θ) = m1(g - a1) - f  ... (3)
+#         # M(a2 + g sin θ) = m2(g - a2) - f  ... (4)
+        
+#         # 從 (3) - (4):
+#         # M(a1 - a2) = m1(g - a1) - m2(g - a2)
+#         # M = [m1(g - a1) - m2(g - a2)] / (a1 - a2)
+        
+#         if abs(a1 - a2) > 0.001:  # 避免除零
+#             M_kg_calculated = (m1_kg * (9.8 - a1) - m2_kg * (9.8 - a2)) / (a1 - a2)
+            
+#             # 計算 sin θ
+#             # 從 Mg sin θ = mg_sin_theta
+#             if M_kg_calculated > 0:
+#                 sin_theta_calculated = mg_sin_theta / (M_kg_calculated * 9.8)
+#                 if -1 <= sin_theta_calculated <= 1:
+#                     theta_calculated = np.degrees(np.arcsin(sin_theta_calculated))
+#                 else:
+#                     theta_calculated = None
+#                     M_kg_calculated = None
+#             else:
+#                 theta_calculated = None
+#                 M_kg_calculated = None
+#         else:
+#             M_kg_calculated = None
+#             theta_calculated = None
+#     else:
+#         M_kg_calculated = None
+#         theta_calculated = None
+    
+#     return {
+#         'zero_crossings': zero_crossings,
+#         'm_minus_g': m_minus_g,
+#         'm_plus_g': m_plus_g,
+#         'mg_sin_theta': mg_sin_theta,
+#         'f_estimated': f_estimated,
+#         'M_calculated_kg': M_kg_calculated,
+#         'M_calculated_g': M_kg_calculated * 1000 if M_kg_calculated else None,
+#         'theta_calculated': theta_calculated,
+#         'calculation_success': M_kg_calculated is not None and theta_calculated is not None,
+#         'high_accel_points_used': len(high_accel_points) if 'high_accel_points' in locals() else 0
+#     }
+# # # def reverse_engineer_parameters(data_points):
 #     """
 #     從 a-m 數據反推物理參數
     
@@ -1254,33 +1448,55 @@ def update_reverse_analysis(forward_data):
     
     if not reverse_result:
         return "反向分析失敗：無法從數據中找到零點", []
-    
-    # 顯示反向分析結果
+
+    # 在回調函數中更新顯示
     results_display = html.Div([
-        html.H4("步驟 1: 零點分析"),
-        html.P(f"找到零點數量: {len(reverse_result['zero_crossings'])}"),
+        html.H4("步驟 1: 數據分類"),
+        html.P(f"向上運動點: {reverse_result['upward_points_count']} 個"),
+        html.P(f"向下運動點: {reverse_result['downward_points_count']} 個"),
         html.P(f"零點位置: {[f'{x:.1f}g' for x in reverse_result['zero_crossings']]}"),
-        html.P(f"m- = {reverse_result['m_minus_g']:.1f} g"),
-        html.P(f"m+ = {reverse_result['m_plus_g']:.1f} g"),
+        html.P(f"m- = {reverse_result['m_minus_g']:.1f} g, m+ = {reverse_result['m_plus_g']:.1f} g" if reverse_result['m_plus_g'] else f"m- = {reverse_result['m_minus_g']:.1f} g"),
         
-        html.H4("步驟 2: 基本參數推算"),
-        html.P("使用公式:"),
-        html.Div("$$Mg\\sin\\theta = \\frac{(m_+ + m_-) \\times g}{2}$$", style={'margin': '10px 0'}),
-        html.Div("$$f = \\frac{(m_+ - m_-) \\times g}{2}$$", style={'margin': '10px 0'}),
-        html.P(f"計算得: Mg sin θ = ({reverse_result['m_plus_g']:.1f} + {reverse_result['m_minus_g']:.1f}) × 9.8 / 2000 = {reverse_result['mg_sin_theta']:.3f} N"),
-        html.P(f"計算得: f = ({reverse_result['m_plus_g']:.1f} - {reverse_result['m_minus_g']:.1f}) × 9.8 / 2000 = {reverse_result['f_estimated']:.3f} N"),
+        html.H4("步驟 2: 物理方程建立"),
+        html.P("向上運動: a(M+m) + Mg sin θ + f = mg"),
+        html.P("向下運動: a(M+m) - Mg sin θ + f = mg"),
+        html.P(f"建立 {reverse_result['equations_used']} 個方程"),
         
-        html.H4("步驟 3: 分離 M 和 θ"),
-        html.P(f"使用 {reverse_result.get('high_accel_points_used', 0)} 個高加速度數據點"),
-        html.P("利用不同質量點的加速度方程組求解"),
+        html.H4("步驟 3: 非線性回歸求解"),
         html.P(f"計算成功: {'是' if reverse_result['calculation_success'] else '否'}"),
-        
         html.Div([
             html.P(f"M = {reverse_result['M_calculated_g']:.1f} g" if reverse_result['M_calculated_g'] else "M = 計算失敗"),
             html.P(f"θ = {reverse_result['theta_calculated']:.1f}°" if reverse_result['theta_calculated'] else "θ = 計算失敗"),
-            html.P(f"f = {reverse_result['f_estimated']:.3f} N"),
+            html.P(f"f = {reverse_result['f_calculated']:.3f} N" if reverse_result['f_calculated'] is not None else "f = 計算失敗"),
         ], style={'backgroundColor': '#e8f5e8', 'padding': '10px', 'borderRadius': '5px'})
     ])
+    
+    # # 顯示反向分析結果
+    # results_display = html.Div([
+    #     html.H4("步驟 1: 零點分析"),
+    #     html.P(f"找到零點數量: {len(reverse_result['zero_crossings'])}"),
+    #     html.P(f"零點位置: {[f'{x:.1f}g' for x in reverse_result['zero_crossings']]}"),
+    #     html.P(f"m- = {reverse_result['m_minus_g']:.1f} g"),
+    #     html.P(f"m+ = {reverse_result['m_plus_g']:.1f} g"),
+        
+    #     html.H4("步驟 2: 基本參數推算"),
+    #     html.P("使用公式:"),
+    #     html.Div("$$Mg\\sin\\theta = \\frac{(m_+ + m_-) \\times g}{2}$$", style={'margin': '10px 0'}),
+    #     html.Div("$$f = \\frac{(m_+ - m_-) \\times g}{2}$$", style={'margin': '10px 0'}),
+    #     html.P(f"計算得: Mg sin θ = ({reverse_result['m_plus_g']:.1f} + {reverse_result['m_minus_g']:.1f}) × 9.8 / 2000 = {reverse_result['mg_sin_theta']:.3f} N"),
+    #     html.P(f"計算得: f = ({reverse_result['m_plus_g']:.1f} - {reverse_result['m_minus_g']:.1f}) × 9.8 / 2000 = {reverse_result['f_estimated']:.3f} N"),
+        
+    #     html.H4("步驟 3: 分離 M 和 θ"),
+    #     html.P(f"使用 {reverse_result.get('high_accel_points_used', 0)} 個高加速度數據點"),
+    #     html.P("利用不同質量點的加速度方程組求解"),
+    #     html.P(f"計算成功: {'是' if reverse_result['calculation_success'] else '否'}"),
+        
+    #     html.Div([
+    #         html.P(f"M = {reverse_result['M_calculated_g']:.1f} g" if reverse_result['M_calculated_g'] else "M = 計算失敗"),
+    #         html.P(f"θ = {reverse_result['theta_calculated']:.1f}°" if reverse_result['theta_calculated'] else "θ = 計算失敗"),
+    #         html.P(f"f = {reverse_result['f_estimated']:.3f} N"),
+    #     ], style={'backgroundColor': '#e8f5e8', 'padding': '10px', 'borderRadius': '5px'})
+    # ])
     
     # 參數對比表格 - 修正鍵值錯誤
     comparison_data = []
