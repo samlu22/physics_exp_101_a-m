@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>OCR + DeepSeek LaTeX Renderer</title>
+  
+  <!-- Plotly for charts -->
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+  <!-- MathJax for LaTeX rendering -->
+  <script>
+    window.MathJax = {
+      tex: { displayMath: [['$$','$$'], ['\\[','\\]']] },
+      chtml: { displayAlign: 'left', displayIndent: '0em' }
+    };
+  </script>
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script id="MathJax-script" async
+          src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    h1, h2, h3 {
+      color: #333;
+    }
+    
+    /* Upload Section */
+    #upload-area {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    
+    input[type="file"] {
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    
+    button {
+      padding: 10px 15px;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background-color 0.3s;
+    }
+    
+    button:hover {
+      background-color: #3367d6;
+    }
+    
+    .image-container {
+      margin-top: 20px;
+      text-align: center;
+      border: 1px dashed #ddd;
+      padding: 20px;
+      border-radius: 4px;
+    }
+    
+    .image-container img {
+      max-height: 400px;
+      max-width: 100%;
+      object-fit: contain;
+    }
+    
+    /* OCR Results */
+    #ocr-result {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #f9f9f9;
+      padding: 15px;
+      border-radius: 4px;
+      border: 1px solid #eee;
+      font-family: monospace;
+      line-height: 1.5;
+    }
+    
+    /* LaTeX Rendering Section */
+    .columns {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .column {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    
+    .column-2 {
+      flex: 0 0 250px;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    .column-3 {
+      flex: 0 0 200px;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    .column-4 {
+      flex: 1;
+      min-width: 600px;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    
+    .latex-line {
+      margin-bottom: 15px;
+      line-height: 1.6;
+    }
+    
+    .formula-image-container {
+      margin: 15px 0;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      border-left: 4px solid #4285f4;
+    }
+    
+    .formula-image {
+      max-width: 100%;
+      display: block;
+      margin: 0 auto;
+    }
+    
+    /* Spinner */
+    #spinner {
+      display: none;
+      text-align: center;
+      margin: 20px 0;
+    }
+    
+    .loader {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #4285f4;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px auto;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* LINE Integration */
+    .line-integration {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .line-info {
+      flex: 1;
+      min-width: 250px;
+    }
+    
+    .line-qr {
+      text-align: center;
+      flex-shrink: 0;
+    }
+    
+    .line-qr img {
+      width: 150px;
+      height: 150px;
+      border: 1px solid #ddd;
+      padding: 5px;
+      background: white;
+    }
+    
+    .line-title {
+      color: #06C755;
+      margin-top: 0;
+    }
+    
+    .line-button {
+      background-color: #06C755;
+      display: inline-block;
+      padding: 8px 15px;
+      border-radius: 4px;
+      color: white;
+      text-decoration: none;
+      margin-top: 10px;
+    }
+    
+    .line-button:hover {
+      background-color: #05a344;
+    }
+    
+    /* LINE Bot specific styles */
+    .line-bot-result {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    
+    .base64-image {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    
+    @media (max-width: 1200px) {
+      .columns {
+        flex-direction: column;
+      }
+      .column-2, .column-3, .column-4 {
+        flex: 1 1 auto;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>OCR + DeepSeek LaTeX Renderer</h1>
+    
+    <!-- LINE Integration Section -->
+    <div class="line-integration">
+      <div class="line-info">
+        <h2 class="line-title">Try Our LINE Bot!</h2>
+        <p>Get OCR results directly in LINE messenger by sending images to our bot.</p>
+        <a href="https://line.me/R/ti/p/@your-bot-id" class="line-button">Add to LINE</a>
+      </div>
+      <div class="line-qr">
+        <p>Scan QR Code:</p>
+        <!-- Use base64 encoded QR code or external URL for LINE bot -->
+        {% if line_qr_base64 %}
+        <img src="data:image/png;base64,{{ line_qr_base64 }}" alt="LINE QR Code">
+        {% else %}
+        <img src="/static/line_qr.png" alt="LINE QR Code">
+        {% endif %}
+      </div>
+    </div>
+    
+    <!-- Upload Section -->
+    <div id="upload-area">
+      <h2>Upload Image for OCR</h2>
+      <form method="POST" enctype="multipart/form-data">
+        <input type="file" name="image" accept=".jpg,.jpeg,.png" required>
+        <button type="submit">Process Image</button>
+      </form>
+      
+      {% if img_url %}
+      <div class="image-container">
+        <p>Uploaded Image:</p>
+        <!-- Support both Flask url_for and direct base64 -->
+        <!-- 
+        {% if img_base64 %}
+        <img src="data:image/png;base64,{{ img_base64 }}" alt="Uploaded image">
+        {% else %}
+        -->
+        <img src="{{ img_url }}" alt="Uploaded image">
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    
+    <!-- OCR Results -->
+    <div id="ocr-result">
+      <h2>OCR Results</h2>
+      {% if ocr_text %}
+      <pre>{{ ocr_text }}</pre>
+      {% else %}
+      <p>No OCR results yet. Upload an image to begin.</p>
+      {% endif %}
+    </div>
+    
+    <!-- Processing Spinner -->
+    <div id="spinner">
+      <div class="loader"></div>
+      <p>正在計算中，請稍候...</p>
+    </div>
+    
+    <!-- DeepSeek LaTeX Rendering -->
+    {% if result %}
+    <div class="columns">
+      <!-- Column 2: LaTeX Rendering -->
+      <div class="column column-2">
+        <h3>LaTeX 渲染</h3>
+        {% for line in result.split('\n') %}
+          {% set clean_line = line.replace('\\[', '').replace('\\]', '').replace('\\(', '').replace('\\)', '') %}
+          {% if clean_line.strip() %}
+            <div class="latex-line">$$ {{ clean_line.strip() }} $$</div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <!-- Column 3: HTML images / chart -->
+      <div class="column column-3">
+        <h3>圖像呈現</h3>
+        {% if images and images|length > 0 %}
+          <div>{{ images[0]|safe }}</div>
+        {% endif %}
+        {% if images and images|length > 1 %}
+          <div style="margin-top: 20px;">{{ images[1]|safe }}</div>
+        {% endif %}
+      </div>
+
+      <!-- Column 4: Full-line rendered images -->
+      <div class="column column-4">
+        <h3>完整內容圖像</h3>
+        {% if latex_image_base64 %}
+          <!-- Use base64 encoded image for LINE bot compatibility -->
+          <img src="data:image/png;base64,{{ latex_image_base64 }}" alt="LaTeX Image" class="formula-image">
+        {% elif latex_image_file %}
+          <!-- Fallback to static file for web app -->
+          <img src="/static/{{ latex_image_file }}" alt="LaTeX Image" class="formula-image">
+        {% else %}
+          <p>未生成任何內容圖像</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+    
+    <!-- LINE Bot Results Section -->
+    {% if is_line_bot %}
+    <div class="line-bot-result">
+      <h2>LINE Bot Results</h2>
+      {% if latex_image_base64 %}
+      <div class="formula-image-container">
+        <img src="data:image/png;base64,{{ latex_image_base64 }}" alt="LaTeX Rendered Formula" class="base64-image">
+      </div>
+      {% endif %}
+      
+      {% if ocr_text %}
+      <div style="margin-top: 20px;">
+        <h3>Extracted Text:</h3>
+        <pre>{{ ocr_text }}</pre>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const form = document.querySelector("form");
+      const spinner = document.getElementById("spinner");
+      
+      if (form) {
+        form.addEventListener("submit", function () {
+          spinner.style.display = "block";
+        });
+      }
+      
+      // Auto-resize textarea if present
+      const textarea = document.querySelector("textarea");
+      if (textarea) {
+        textarea.addEventListener('input', function() {
+          this.style.height = 'auto';
+          this.style.height = (this.scrollHeight) + 'px';
+        });
+      }
+    });
+  </script>
+</body>
+</html>
